@@ -1,5 +1,7 @@
 import os
 import re
+import sys
+import codecs
 import nextcord
 import shutil
 from nextcord.ext import tasks, commands
@@ -12,6 +14,7 @@ intents.presences = True
 intents.message_content = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
+sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach())
 
 #Mention the role that will be notified when the bot is broken
 Staff = 1132058617563070484

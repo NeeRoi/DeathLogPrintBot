@@ -1,7 +1,7 @@
 import os
 import re
 import nextcord
-import time
+import shutil
 from nextcord.ext import tasks, commands
 from datetime import datetime, timedelta
 from config import TOKEN
@@ -25,6 +25,7 @@ ALLOWED_ROLES = [1132625665175339008, 1129764708858200154, 1129764767628787742, 
 BEASTS_LOG_PATH = r'G:\Programme (x86)\Videotheke\Beastsofbermuda\Tech\BeastsOfBermuda.log'
 BOT_LOG_PATH = r'G:\Programme (x86)\Videotheke\Beastsofbermuda\Tech\Bots\DeathLogPrint Bot\logs\Bot.log'
 BACKUP_FOLDER_PATH = r"G:\Programme (x86)\Videotheke\Beastsofbermuda\Tech\Bots\DeathLogPrint Bot\logs\backup"
+LAST_BACKUP_FILE = r'G:\Programme (x86)\Videotheke\Beastsofbermuda\Tech\Bots\DeathLogPrint Bot\logs\last_backup.txt'
 
 #Death reasons listed
 DEATH_REASONS = [
@@ -58,10 +59,10 @@ async def on_ready():
         
     check_log.start()
     backup_log.start()
-    #cleanup_old_backups.start()
+    cleanup_old_backups.start()
 
 async def check_log_process():
-    await bot.change_presence(activity=nextcord.Game(name="Looking for new deaths!"))
+    await bot.change_presence(activity=nextcord.Game(name="Looking for new deaths!"), status=nextcord.Status.online)
     timestamped_print("Starting check_log_process")
     
     #Check if both files exist
@@ -115,46 +116,96 @@ async def check_log_process():
     #Writing to Bot.log file and sending a messages to the discord deathlog channel
     with open(BOT_LOG_PATH, 'a', encoding='utf-8') as bot_log:
         channel = bot.get_channel(CHANNEL_ID)
-        for line in temp_list:
-            print(f"Writing line to bot log and sending message: {line}")
-            bot_log.write(line + '\n')
-            await channel.send(line)
-
-    await bot.change_presence(activity=nextcord.Game(name="Idle"))        
-    timestamped_print("Finished check_log_process")
+        if temp_list:  # if temp_list is not empty
+            for line in temp_list:
+                print(f"Writing line to bot log and sending message: {line}")
+                bot_log.write(line + '\n')
+                await channel.send(line)
+            await bot.change_presence(activity=nextcord.Game(name="Idle /checknow to check manually"), status=nextcord.Status.idle)        
+            timestamped_print("Finished check_log_process")
+            return True  #new deaths were found
+        else:
+            await bot.change_presence(activity=nextcord.Game(name="Idle /checknow to check manually"), status=nextcord.Status.idle)        
+            timestamped_print("Finished check_log_process")
+            return False  #no new deaths were found
 
 #Command to check the log file manually
-@bot.command(name='checknow')
-@commands.has_any_role(*ALLOWED_ROLES)
-async def checknow(ctx):
-    await ctx.send("DeathLogPrint Bot is processing the log file, please wait. If no new lines are added to the deathlog channel, no new deaths have been found.")
-    await check_log_process()    
-    print(f'{ctx.author} used the !checknow command.')
-#Error message if the user doesn't have the required role
-@checknow.error
-async def checknow_error(ctx, error):
-    if isinstance(error, commands.errors.MissingAnyRole):
-        await ctx.send("You don't have the required role to run this command.")
+@bot.slash_command(guild_ids=[1129093489670500422])
+async def checknow(interaction: nextcord.Interaction):
+    print(f'{interaction.user} used the /checknow command.')
+    # Check if the user has any of the allowed roles
+    user_roles = [role.id for role in interaction.user.roles]
+    if not any(role in user_roles for role in ALLOWED_ROLES):
+        await interaction.response.send_message("You don't have the required role to run this command.", ephemeral=True, delete_after=30)
+        return
+
+    await interaction.response.send_message("DeathLogPrint Bot is processing the log file, please wait.", ephemeral=True, delete_after=30)
+    new_deaths_found = await check_log_process()  
+    if not new_deaths_found:
+        await interaction.followup.send("No new deaths were found.", ephemeral=True, delete_after=30)
 
 #Start the Checklog Process every hour
 @tasks.loop(hours=1)
 async def check_log():
     await check_log_process()
 
-
 #Backup the Bot.log file every 7 days
-@tasks.loop(hours=168) #Backup every 7 Days
+def get_time_since_last_backup():
+    try:
+        with open(LAST_BACKUP_FILE, 'r') as f:
+            last_backup_str = f.read().strip()
+            if last_backup_str:  # Check if the string is not empty
+                last_backup = datetime.fromisoformat(last_backup_str)
+            else:
+                raise ValueError("Invalid isoformat string: ''")
+    except (FileNotFoundError, ValueError):  # Catch both FileNotFoundError and ValueError
+        last_backup = datetime.now()
+        with open(LAST_BACKUP_FILE, 'w') as f:
+            f.write(last_backup.isoformat())
+    return (datetime.now() - last_backup).total_seconds()
+
+@tasks.loop(seconds=360)  #Check every hour
 async def backup_log():
-    #Write "Finish" to the end of the Bot.log file
-    with open(BOT_LOG_PATH, 'a', encoding='utf-8') as bot_log:
-        bot_log.write('Finish\n')
-    #Rename the Bot.log file to Bot_Backup_YYYY-MM-DD.log
+    if get_time_since_last_backup() >= 168 * 3600:
+        #Write "Finish" to the end of the Bot.log file
+        with open(BOT_LOG_PATH, 'a', encoding='utf-8') as bot_log:
+            bot_log.write('Finish\n')
+        #Rename the Bot.log file to Bot_Backup_YYYY-MM-DD.log
+        now = datetime.now()
+        date_string = now.strftime("%Y-%m-%d")
+        new_log_path = f'Bot_Backup_{date_string}.log'
+        os.rename(BOT_LOG_PATH, new_log_path)
+
+        #Move the file to the backup folder
+        shutil.move(new_log_path, os.path.join(BACKUP_FOLDER_PATH, new_log_path))
+
+        #Create a new Bot.log file after the old one is moved
+        open(BOT_LOG_PATH, 'a').close()
+
+        #Send a message to the deathlog channel
+        backup_channel = bot.get_channel(CHANNEL_ID)
+        await backup_channel.send(f"Bot.log has been backed up as Bot_Backup_{date_string}.log.")
+
+        #Write a timestamp to the last_backup.txt file
+        with open(LAST_BACKUP_FILE, 'w') as f:
+            f.write(datetime.now().isoformat())
+
+#Cleanup old backups every day
+@tasks.loop(hours=24)
+async def cleanup_old_backups():
     now = datetime.now()
-    date_string = now.strftime("%Y-%m-%d")
-    os.rename(BOT_LOG_PATH, f'Bot_Backup_{date_string}.log')
-    os.system(f"move Bot_Backup_*.log {BACKUP_FOLDER_PATH}")
-    # Create a new Bot.log file after the old one is moved
-    open(BOT_LOG_PATH, 'a').close()
+    two_months_ago = now - timedelta(days=60) #backup files older than 2 months will be deleted
+    for filename in os.listdir(BACKUP_FOLDER_PATH):
+        #Check if the file is a backup file
+        if filename.startswith('Bot_Backup_'):
+            #Extract the date from the filename
+            date_str = filename.replace('Bot_Backup_', '').replace('.log', '')
+            file_date = datetime.strptime(date_str, '%Y-%m-%d')
+            #If the file is older than 2 months, delete it
+            if file_date < two_months_ago:
+                file_path = os.path.join(BACKUP_FOLDER_PATH, filename)
+                os.remove(file_path)
+                print(f"Deleted old backup file: {filename}")
 
 
 bot.run(TOKEN)

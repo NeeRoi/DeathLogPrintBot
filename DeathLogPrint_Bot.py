@@ -52,7 +52,7 @@ async def on_ready():
     try:
         with open(BOT_LOG_PATH, 'r', encoding='utf-8') as file:
             lines = file.readlines()
-            # check if lines is not empty and the last line is not 'Finish'
+            #check if lines is not empty and the last line is not 'Finish'
             if lines and lines[-1].strip() != 'Finish':
                 with open(BOT_LOG_PATH, 'a') as file:
                     file.write('Finish\n')
@@ -119,7 +119,7 @@ async def check_log_process():
     #Writing to Bot.log file and sending a messages to the discord deathlog channel
     with open(BOT_LOG_PATH, 'a', encoding='utf-8') as bot_log:
         channel = bot.get_channel(CHANNEL_ID)
-        if temp_list:  # if temp_list is not empty
+        if temp_list:  #if temp_list is not empty
             for line in temp_list:
                 print(f"Writing line to bot log and sending message: {line}")
                 bot_log.write(line + '\n')
@@ -136,7 +136,7 @@ async def check_log_process():
 @bot.slash_command(guild_ids=[1129093489670500422])
 async def checknow(interaction: nextcord.Interaction):
     print(f'{interaction.user} used the /checknow command.')
-    # Check if the user has any of the allowed roles
+    #Check if the user has any of the allowed roles
     user_roles = [role.id for role in interaction.user.roles]
     if not any(role in user_roles for role in ALLOWED_ROLES):
         await interaction.response.send_message("You don't have the required role to run this command.", ephemeral=True, delete_after=30)
@@ -157,11 +157,11 @@ def get_time_since_last_backup():
     try:
         with open(LAST_BACKUP_FILE, 'r') as f:
             last_backup_str = f.read().strip()
-            if last_backup_str:  # Check if the string is not empty
+            if last_backup_str:  #Check if the string is not empty
                 last_backup = datetime.fromisoformat(last_backup_str)
             else:
                 raise ValueError("Invalid isoformat string: ''")
-    except (FileNotFoundError, ValueError):  # Catch both FileNotFoundError and ValueError
+    except (FileNotFoundError, ValueError):  #Catch both FileNotFoundError and ValueError
         last_backup = datetime.now()
         with open(LAST_BACKUP_FILE, 'w') as f:
             f.write(last_backup.isoformat())
